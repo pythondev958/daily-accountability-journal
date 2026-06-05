@@ -59,6 +59,7 @@ function App() {
   const [noteType, setNoteType] = useState("General Note");
   const [mood, setMood] = useState("Calm");
   const [filter, setFilter] = useState("today");
+  const [successMessage, setSuccessMessage] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [voiceMessage, setVoiceMessage] = useState("");
 
@@ -197,6 +198,14 @@ function App() {
     return Object.entries(grouped).map(([name, value]) => ({ name, value }));
   }, [filteredExpenses]);
 
+  const showSuccess = (message: string) => {
+  setSuccessMessage(message);
+
+  setTimeout(() => {
+    setSuccessMessage("");
+  }, 2200);
+};
+
   const addExpense = (e: React.FormEvent) => {
     e.preventDefault();
     const numericAmount = Number(amount);
@@ -216,6 +225,7 @@ function App() {
     setTitle("");
     setAmount("");
     setCategory("General");
+    showSuccess("Expense added successfully");
   };
 
   const addNote = (e: React.FormEvent) => {
@@ -237,6 +247,7 @@ function App() {
     setNoteType("General Note");
     setMood("Calm");
     setVoiceMessage("");
+    showSuccess("Note added successfully");
   };
 
   const deleteExpense = (id: string) => {
@@ -334,6 +345,7 @@ function App() {
 
   return (
     <main className="app">
+      {successMessage && <div className="toast">{successMessage}</div>}
       <section className="hero">
         <div>
           <p className="label">Private daily tracker</p>

@@ -1,3 +1,25 @@
+.toast {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 999;
+  background: #0f766e;
+  color: white;
+  padding: 13px 16px;
+  border-radius: 14px;
+  box-shadow: 0 12px 28px rgba(15, 118, 110, 0.22);
+  font-weight: bold;
+}
+
+@media (max-width: 640px) {
+  .toast {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    text-align: center;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
