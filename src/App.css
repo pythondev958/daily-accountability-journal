@@ -624,3 +624,34 @@ textarea {
   min-height: 150px;
   resize: vertical;
 }
+
+.quick-note-preview {
+  margin-top: 14px;
+  background: #ffffff;
+  border: 1px solid #99f6e4;
+  border-radius: 18px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.quick-note-preview span {
+  color: var(--primary-dark);
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.quick-note-preview textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.simple-note-form {
+  display: grid;
+  gap: 12px;
+}
+
+.simple-note-form textarea {
+  min-height: 150px;
+  resize: vertical;
+}

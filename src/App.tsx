@@ -395,9 +395,7 @@ function App() {
     showSuccess("Expense saved");
   };
 
-  const addNote = (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const saveNote = () => {
     if (!noteText.trim()) return;
 
     setNotes([
@@ -412,6 +410,11 @@ function App() {
     setNoteText("");
     setVoiceMessage("");
     showSuccess("Note saved");
+  };
+
+  const addNote = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveNote();
   };
 
   const deleteExpense = (id: string) => {
@@ -618,6 +621,22 @@ function App() {
         </div>
 
         {voiceMessage && <p className="voice-status">{voiceMessage}</p>}
+
+        {noteText.trim() && (
+          <div className="quick-note-preview">
+            <span>Note ready to save</span>
+
+            <textarea
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Your spoken note will appear here..."
+            />
+
+            <button type="button" onClick={saveNote}>
+              Save Note
+            </button>
+          </div>
+        )}
 
         <p className="privacy-note">No login. No backend. Your data stays in your browser.</p>
       </section>
