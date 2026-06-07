@@ -13,9 +13,7 @@ type Expense = {
 
 type Note = {
   id: string;
-  type: string;
   text: string;
-  mood: string;
   createdAt: string;
 };
 
@@ -49,27 +47,12 @@ const categories = [
   "Food",
   "Travel",
   "Health",
-  "Family",
-  "Work",
-  "Self-care",
   "Rent",
   "Bills",
+  "Work",
+  "Self-care",
   "Other",
 ];
-
-const quickCategories = ["Food", "Travel", "Health", "Rent", "Bills", "Work", "Other"];
-
-const noteTypes = [
-  "General Note",
-  "Call / Interaction",
-  "Trigger / Relapse Log",
-  "Food Log",
-  "Workout / Health",
-  "Prayer / Reflection",
-  "Work Progress",
-];
-
-const moods = ["Calm", "Productive", "Stressed", "Angry", "Sad", "Tired", "Grateful"];
 
 const chartColors = [
   "#0f766e",
@@ -81,7 +64,6 @@ const chartColors = [
   "#64748b",
   "#14b8a6",
   "#0ea5e9",
-  "#84cc16",
 ];
 
 function App() {
@@ -93,8 +75,6 @@ function App() {
   const [category, setCategory] = useState("General");
 
   const [noteText, setNoteText] = useState("");
-  const [noteType, setNoteType] = useState("General Note");
-  const [mood, setMood] = useState("Calm");
 
   const [filter, setFilter] = useState("today");
   const [successMessage, setSuccessMessage] = useState("");
@@ -128,10 +108,7 @@ function App() {
 
   const showSuccess = (message: string) => {
     setSuccessMessage(message);
-
-    setTimeout(() => {
-      setSuccessMessage("");
-    }, 2200);
+    setTimeout(() => setSuccessMessage(""), 2200);
   };
 
   const isSpeechSupported = () => {
@@ -211,7 +188,7 @@ function App() {
       setTitle(cleanText);
       setAmount("");
       setCategory(guessCategory(cleanText));
-      setVoiceMessage("Could not detect amount. Please enter amount manually.");
+      setVoiceMessage("Amount not detected. Please enter amount manually.");
       return;
     }
 
@@ -226,7 +203,7 @@ function App() {
     setTitle(titleWithoutAmount || cleanText);
     setAmount(detectedAmount);
     setCategory(guessCategory(cleanText));
-    setVoiceMessage("Voice expense filled. Review and tap Add Expense.");
+    setVoiceMessage("Expense captured. Review and tap Save Expense.");
   };
 
   const startVoiceCapture = (mode: "note" | "expense") => {
@@ -258,7 +235,6 @@ function App() {
       }
 
       const spokenText = finalText.trim();
-
       if (!spokenText) return;
 
       if (mode === "note") {
@@ -284,8 +260,8 @@ function App() {
           setVoiceMode(mode);
           setVoiceMessage(
             mode === "expense"
-              ? "Listening for expense... example: Foodpanda burgers 800 rupees."
-              : "Listening for note... speak naturally."
+              ? "Listening for expense. Example: Foodpanda burgers 800 rupees."
+              : "Listening for note. Speak naturally."
           );
         } catch {
           setIsListening(false);
@@ -307,8 +283,8 @@ function App() {
       setVoiceMode(mode);
       setVoiceMessage(
         mode === "expense"
-          ? "Listening for expense... example: Foodpanda burgers 800 rupees."
-          : "Listening for note... speak naturally."
+          ? "Listening for expense. Example: Foodpanda burgers 800 rupees."
+          : "Listening for note. Speak naturally."
       );
     } catch {
       setVoiceMessage("Voice input could not start. Please try again.");
@@ -364,32 +340,32 @@ function App() {
     return Object.entries(grouped).map(([name, value]) => ({ name, value }));
   }, [filteredExpenses]);
 
-  const todayTimeline = useMemo(() => {
-    const timelineItems: TimelineItem[] = [
+  const timeline = useMemo(() => {
+    const items: TimelineItem[] = [
       ...filteredExpenses.map((item) => ({
         id: item.id,
         kind: "expense" as const,
         title: item.title,
-        subtitle: `${item.category} • ${new Date(item.createdAt).toLocaleTimeString("en-PK", {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`,
+        subtitle: `${item.category} • ${new Date(item.createdAt).toLocaleTimeString(
+          "en-PK",
+          { hour: "2-digit", minute: "2-digit" }
+        )}`,
         amount: item.amount,
         createdAt: item.createdAt,
       })),
       ...filteredNotes.map((item) => ({
         id: item.id,
         kind: "note" as const,
-        title: item.type,
-        subtitle: `Mood: ${item.mood} • ${new Date(item.createdAt).toLocaleTimeString("en-PK", {
+        title: "Note",
+        subtitle: new Date(item.createdAt).toLocaleTimeString("en-PK", {
           hour: "2-digit",
           minute: "2-digit",
-        })}`,
+        }),
         createdAt: item.createdAt,
       })),
     ];
 
-    return timelineItems
+    return items
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 8);
   }, [filteredExpenses, filteredNotes]);
@@ -416,7 +392,7 @@ function App() {
     setAmount("");
     setCategory("General");
     setCapturedExpenseText("");
-    showSuccess("Expense added successfully");
+    showSuccess("Expense saved");
   };
 
   const addNote = (e: React.FormEvent) => {
@@ -427,19 +403,15 @@ function App() {
     setNotes([
       {
         id: crypto.randomUUID(),
-        type: noteType,
         text: noteText.trim(),
-        mood,
         createdAt: new Date().toISOString(),
       },
       ...notes,
     ]);
 
     setNoteText("");
-    setNoteType("General Note");
-    setMood("Calm");
     setVoiceMessage("");
-    showSuccess("Note added successfully");
+    showSuccess("Note saved");
   };
 
   const deleteExpense = (id: string) => {
@@ -454,88 +426,139 @@ function App() {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth" });
   };
 
+  const addPdfHeader = (doc: jsPDF, titleText: string) => {
+    doc.setFillColor(15, 118, 110);
+    doc.rect(0, 0, 210, 28, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text(titleText, 14, 18);
+    doc.setTextColor(20, 53, 47);
+  };
+
+  const addPageIfNeeded = (doc: jsPDF, y: number) => {
+    if (y > 270) {
+      doc.addPage();
+      addPdfHeader(doc, "Daily Accountability Journal");
+      return 40;
+    }
+
+    return y;
+  };
+
   const downloadPDF = () => {
     const doc = new jsPDF();
-    let y = 16;
+    let y = 40;
 
-    doc.setFontSize(18);
-    doc.text("Daily Accountability Journal", 14, y);
-    y += 10;
+    addPdfHeader(doc, "Daily Accountability Journal");
 
     doc.setFontSize(11);
+    doc.setTextColor(71, 85, 105);
     doc.text(`Generated: ${new Date().toLocaleString("en-PK")}`, 14, y);
     y += 7;
     doc.text(`Selected view: ${filter}`, 14, y);
-    y += 7;
-    doc.text(`Total expenses: Rs. ${total.toLocaleString()}`, 14, y);
-    y += 7;
-    doc.text(`Expense entries: ${filteredExpenses.length}`, 14, y);
-    y += 7;
-    doc.text(`Notes: ${filteredNotes.length}`, 14, y);
     y += 11;
 
+    doc.setFillColor(240, 253, 250);
+    doc.roundedRect(14, y, 182, 30, 4, 4, "F");
+    doc.setTextColor(20, 53, 47);
+    doc.setFontSize(11);
+    doc.text(`Total Expenses: Rs. ${total.toLocaleString()}`, 20, y + 10);
+    doc.text(`Expense Entries: ${filteredExpenses.length}`, 20, y + 20);
+    doc.text(`Notes: ${filteredNotes.length}`, 105, y + 20);
+    y += 42;
+
     doc.setFontSize(14);
+    doc.setTextColor(15, 118, 110);
     doc.text("Expenses", 14, y);
     y += 8;
 
+    doc.setTextColor(20, 53, 47);
+    doc.setFontSize(10);
+
     if (filteredExpenses.length === 0) {
-      doc.setFontSize(10);
-      doc.text("No expenses found for selected view.", 14, y);
+      doc.text("No expenses found for this view.", 14, y);
       y += 8;
     }
 
-    filteredExpenses.forEach((item) => {
-      if (y > 275) {
-        doc.addPage();
-        y = 16;
-      }
+    filteredExpenses.forEach((item, index) => {
+      y = addPageIfNeeded(doc, y);
 
       doc.setFontSize(10);
-      const line = `${item.title} | Rs. ${item.amount.toLocaleString()} | ${
+      doc.setTextColor(20, 53, 47);
+
+      const titleLine = `${index + 1}. ${item.title}`;
+      const metaLine = `Amount: Rs. ${item.amount.toLocaleString()} | Category: ${
         item.category
-      } | ${new Date(item.createdAt).toLocaleString("en-PK")}`;
+      } | Time: ${new Date(item.createdAt).toLocaleString("en-PK")}`;
+
+      const titleWrapped = doc.splitTextToSize(titleLine, 180);
+      doc.text(titleWrapped, 14, y);
+      y += titleWrapped.length * 5;
+
+      doc.setTextColor(100, 116, 139);
+      const metaWrapped = doc.splitTextToSize(metaLine, 180);
+      doc.text(metaWrapped, 18, y);
+      y += metaWrapped.length * 5 + 4;
+    });
+
+    y += 6;
+    y = addPageIfNeeded(doc, y);
+
+    doc.setFontSize(14);
+    doc.setTextColor(15, 118, 110);
+    doc.text("Notes", 14, y);
+    y += 8;
+
+    doc.setFontSize(10);
+
+    if (filteredNotes.length === 0) {
+      doc.setTextColor(20, 53, 47);
+      doc.text("No notes found for this view.", 14, y);
+      y += 8;
+    }
+
+    filteredNotes.forEach((item, index) => {
+      y = addPageIfNeeded(doc, y);
+
+      doc.setTextColor(20, 53, 47);
+      doc.text(`${index + 1}. ${new Date(item.createdAt).toLocaleString("en-PK")}`, 14, y);
+      y += 6;
+
+      doc.setTextColor(71, 85, 105);
+      const lines = doc.splitTextToSize(item.text, 180);
+      doc.text(lines, 18, y);
+      y += lines.length * 5 + 6;
+    });
+
+    y += 6;
+    y = addPageIfNeeded(doc, y);
+
+    doc.setFontSize(14);
+    doc.setTextColor(15, 118, 110);
+    doc.text("Timeline", 14, y);
+    y += 8;
+
+    if (timeline.length === 0) {
+      doc.setFontSize(10);
+      doc.setTextColor(20, 53, 47);
+      doc.text("No timeline items found for this view.", 14, y);
+      y += 8;
+    }
+
+    timeline.forEach((item) => {
+      y = addPageIfNeeded(doc, y);
+
+      doc.setFontSize(10);
+      doc.setTextColor(20, 53, 47);
+
+      const line =
+        item.kind === "expense"
+          ? `Expense: ${item.title} | Rs. ${item.amount?.toLocaleString()} | ${item.subtitle}`
+          : `Note: ${item.subtitle}`;
 
       const wrapped = doc.splitTextToSize(line, 180);
       doc.text(wrapped, 14, y);
-      y += wrapped.length * 6 + 3;
-    });
-
-    y += 8;
-
-    if (y > 265) {
-      doc.addPage();
-      y = 16;
-    }
-
-    doc.setFontSize(14);
-    doc.text("Notes / Mood / Events", 14, y);
-    y += 8;
-
-    if (filteredNotes.length === 0) {
-      doc.setFontSize(10);
-      doc.text("No notes found for selected view.", 14, y);
-      y += 8;
-    }
-
-    filteredNotes.forEach((item) => {
-      if (y > 265) {
-        doc.addPage();
-        y = 16;
-      }
-
-      doc.setFontSize(10);
-      doc.text(
-        `${item.type} | Mood: ${item.mood} | ${new Date(item.createdAt).toLocaleString(
-          "en-PK"
-        )}`,
-        14,
-        y
-      );
-      y += 6;
-
-      const lines = doc.splitTextToSize(item.text, 180);
-      doc.text(lines, 14, y);
-      y += lines.length * 6 + 5;
+      y += wrapped.length * 5 + 4;
     });
 
     doc.save("daily-accountability-journal.pdf");
@@ -550,7 +573,7 @@ function App() {
           <p className="label">Private daily tracker</p>
           <h1>Daily Accountability Journal</h1>
           <p className="subtitle">
-            Track expenses, notes, mood, habits and reflections. Your data stays in your browser.
+            Speak expenses, speak notes, review quickly, save, and export your day as a clean PDF.
           </p>
         </div>
 
@@ -563,12 +586,10 @@ function App() {
       <section className="quick-actions card">
         <div className="section-heading">
           <h2>Quick capture</h2>
-          <p>Use fast buttons for mobile. Voice expense fills the form for review before saving.</p>
+          <p>Fast mobile-first capture. Speak, review, and save.</p>
         </div>
 
         <div className="quick-grid">
-          <button onClick={() => scrollToSection("expense-section")}>+ Expense</button>
-
           <button
             className={isListening && voiceMode === "expense" ? "voice-button listening" : "voice-button"}
             onClick={() =>
@@ -577,7 +598,7 @@ function App() {
                 : startVoiceCapture("expense")
             }
           >
-            {isListening && voiceMode === "expense" ? "Stop Expense Voice" : "Voice Expense"}
+            {isListening && voiceMode === "expense" ? "Stop Expense Voice" : "Speak Expense"}
           </button>
 
           <button
@@ -586,8 +607,10 @@ function App() {
               isListening && voiceMode === "note" ? stopVoiceCapture() : startVoiceCapture("note")
             }
           >
-            {isListening && voiceMode === "note" ? "Stop Note Voice" : "Voice Note"}
+            {isListening && voiceMode === "note" ? "Stop Note Voice" : "Speak Note"}
           </button>
+
+          <button onClick={() => scrollToSection("expense-section")}>Manual Expense</button>
 
           <button className="export-button" onClick={downloadPDF}>
             Export PDF
@@ -628,14 +651,12 @@ function App() {
 
         <div className="summary-card">
           <span>Highest expense</span>
-          <strong>
-            {highestExpense ? `Rs. ${highestExpense.amount.toLocaleString()}` : "—"}
-          </strong>
+          <strong>{highestExpense ? `Rs. ${highestExpense.amount.toLocaleString()}` : "—"}</strong>
           {highestExpense && <small>{highestExpense.title}</small>}
         </div>
       </section>
 
-      {todayTimeline.length > 0 && (
+      {timeline.length > 0 && (
         <section className="card timeline-card">
           <div className="section-heading">
             <h2>Latest timeline</h2>
@@ -643,13 +664,15 @@ function App() {
           </div>
 
           <div className="timeline-list">
-            {todayTimeline.map((item) => (
+            {timeline.map((item) => (
               <div className="timeline-item" key={`${item.kind}-${item.id}`}>
                 <span className={item.kind === "expense" ? "dot expense-dot" : "dot note-dot"} />
+
                 <div>
                   <strong>{item.title}</strong>
                   <p>{item.subtitle}</p>
                 </div>
+
                 {item.amount && <b>Rs. {item.amount.toLocaleString()}</b>}
               </div>
             ))}
@@ -659,8 +682,8 @@ function App() {
 
       <section id="expense-section" className="card">
         <div className="section-heading">
-          <h2>Add expense</h2>
-          <p>Type manually or use voice expense. Review before saving.</p>
+          <h2>Expense</h2>
+          <p>Voice fills this form automatically. Review, edit if needed, then save.</p>
         </div>
 
         {capturedExpenseText && (
@@ -674,7 +697,7 @@ function App() {
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Example: Tea, travel, lunch, medicine"
+            placeholder="Expense title"
           />
 
           <input
@@ -691,11 +714,11 @@ function App() {
             ))}
           </select>
 
-          <button type="submit">Add Expense</button>
+          <button type="submit">Save Expense</button>
         </form>
 
         <div className="category-chips">
-          {quickCategories.map((item) => (
+          {categories.map((item) => (
             <button
               type="button"
               key={item}
@@ -710,30 +733,18 @@ function App() {
 
       <section id="note-section" className="card">
         <div className="section-heading">
-          <h2>Add note</h2>
-          <p>Type your note or use voice note. Voice is converted to text only.</p>
+          <h2>Note</h2>
+          <p>Speak naturally or type. ChatGPT can analyze mood and patterns later from the PDF.</p>
         </div>
 
-        <form onSubmit={addNote} className="note-form">
-          <select value={noteType} onChange={(e) => setNoteType(e.target.value)}>
-            {noteTypes.map((item) => (
-              <option key={item}>{item}</option>
-            ))}
-          </select>
-
-          <select value={mood} onChange={(e) => setMood(e.target.value)}>
-            {moods.map((item) => (
-              <option key={item}>{item}</option>
-            ))}
-          </select>
-
+        <form onSubmit={addNote} className="simple-note-form">
           <textarea
             value={noteText}
             onChange={(e) => setNoteText(e.target.value)}
-            placeholder="Write or speak a note about your day, mood, trigger, food, workout, call, or reflection."
+            placeholder="Speak or write anything about your day..."
           />
 
-          <button type="submit">Add Note</button>
+          <button type="submit">Save Note</button>
         </form>
       </section>
 
@@ -798,7 +809,7 @@ function App() {
       <section className="card">
         <div className="section-heading">
           <h2>Notes</h2>
-          <p>Saved notes, moods and events for selected view.</p>
+          <p>Saved notes for selected view.</p>
         </div>
 
         {filteredNotes.length === 0 ? (
@@ -808,10 +819,7 @@ function App() {
             {filteredNotes.map((item) => (
               <article className="list-item note-item" key={item.id}>
                 <div>
-                  <strong>{item.type}</strong>
-                  <p>
-                    Mood: {item.mood} • {new Date(item.createdAt).toLocaleString("en-PK")}
-                  </p>
+                  <strong>{new Date(item.createdAt).toLocaleString("en-PK")}</strong>
                   <p className="note-text">{item.text}</p>
                 </div>
 

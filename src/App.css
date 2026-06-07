@@ -614,3 +614,13 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+.simple-note-form {
+  display: grid;
+  gap: 12px;
+}
+
+.simple-note-form textarea {
+  min-height: 150px;
+  resize: vertical;
+}
