@@ -3,26 +3,11 @@ import { jsPDF } from "jspdf";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import "./App.css";
 
-type Expense = {
-  id: string;
-  title: string;
-  amount: number;
-  category: string;
-  createdAt: string;
-};
-
-type Note = {
+type Entry = {
   id: string;
   text: string;
-  createdAt: string;
-};
-
-type TimelineItem = {
-  id: string;
-  kind: "expense" | "note";
-  title: string;
-  subtitle: string;
   amount?: number;
+  category?: string;
   createdAt: string;
 };
 
@@ -37,10 +22,9 @@ type SpeechRecognitionType = {
   onend: (() => void) | null;
 };
 
-type VoiceMode = "note" | "expense" | null;
-
-const EXPENSE_KEY = "daj-expenses";
-const NOTE_KEY = "daj-notes";
+const ENTRY_KEY = "daj-unified-entries-v1";
+const OLD_EXPENSE_KEY = "daj-expenses";
+const OLD_NOTE_KEY = "daj-notes";
 
 const categories = [
   "General",
@@ -67,37 +51,53 @@ const chartColors = [
 ];
 
 function App() {
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [notes, setNotes] = useState<Note[]>([]);
-
-  const [title, setTitle] = useState("");
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("General");
-
-  const [noteText, setNoteText] = useState("");
-
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [draftText, setDraftText] = useState("");
   const [filter, setFilter] = useState("today");
   const [successMessage, setSuccessMessage] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [voiceMessage, setVoiceMessage] = useState("");
-  const [voiceMode, setVoiceMode] = useState<VoiceMode>(null);
-  const [capturedExpenseText, setCapturedExpenseText] = useState("");
 
   const recognitionRef = useRef<SpeechRecognitionType | null>(null);
   const shouldKeepListeningRef = useRef(false);
 
   useEffect(() => {
-    setExpenses(JSON.parse(localStorage.getItem(EXPENSE_KEY) || "[]"));
-    setNotes(JSON.parse(localStorage.getItem(NOTE_KEY) || "[]"));
+    const savedEntries = localStorage.getItem(ENTRY_KEY);
+
+    if (savedEntries) {
+      setEntries(JSON.parse(savedEntries));
+      return;
+    }
+
+    const oldExpenses = JSON.parse(localStorage.getItem(OLD_EXPENSE_KEY) || "[]");
+    const oldNotes = JSON.parse(localStorage.getItem(OLD_NOTE_KEY) || "[]");
+
+    if (oldExpenses.length || oldNotes.length) {
+      const migratedEntries: Entry[] = [
+        ...oldExpenses.map((item: any) => ({
+          id: item.id || crypto.randomUUID(),
+          text: `${item.title} - Rs. ${item.amount}`,
+          amount: Number(item.amount),
+          category: item.category || "General",
+          createdAt: item.createdAt || new Date().toISOString(),
+        })),
+        ...oldNotes.map((item: any) => ({
+          id: item.id || crypto.randomUUID(),
+          text: item.text,
+          createdAt: item.createdAt || new Date().toISOString(),
+        })),
+      ].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+
+      setEntries(migratedEntries);
+    }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(EXPENSE_KEY, JSON.stringify(expenses));
-  }, [expenses]);
-
-  useEffect(() => {
-    localStorage.setItem(NOTE_KEY, JSON.stringify(notes));
-  }, [notes]);
+    localStorage.setItem(ENTRY_KEY, JSON.stringify(entries));
+  }, [entries]);
 
   const todayLabel = new Date().toLocaleDateString("en-PK", {
     weekday: "long",
@@ -179,34 +179,41 @@ function App() {
     return "General";
   };
 
-  const parseVoiceExpense = (spokenText: string) => {
-    const cleanText = spokenText.trim();
-    const matches = cleanText.match(/\d+(?:,\d+)*(?:\.\d+)?/g);
+  const detectAmount = (text: string) => {
+    const matches = text.match(/\d+(?:,\d+)*(?:\.\d+)?/g);
 
-    if (!matches || matches.length === 0) {
-      setCapturedExpenseText(cleanText);
-      setTitle(cleanText);
-      setAmount("");
-      setCategory(guessCategory(cleanText));
-      setVoiceMessage("Amount not detected. Please enter amount manually.");
-      return;
-    }
+    if (!matches || matches.length === 0) return undefined;
 
-    const detectedAmount = matches[matches.length - 1].replace(/,/g, "");
-    const titleWithoutAmount = cleanText
-      .replace(matches[matches.length - 1], "")
-      .replace(/\b(rupees|rs|pkr|r s)\b/gi, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    setCapturedExpenseText(cleanText);
-    setTitle(titleWithoutAmount || cleanText);
-    setAmount(detectedAmount);
-    setCategory(guessCategory(cleanText));
-    setVoiceMessage("Expense captured. Review and tap Save Expense.");
+    return Number(matches[matches.length - 1].replace(/,/g, ""));
   };
 
-  const startVoiceCapture = (mode: "note" | "expense") => {
+  const saveEntry = () => {
+    const cleanText = draftText.trim();
+
+    if (!cleanText) return;
+
+    const amount = detectAmount(cleanText);
+    const category = amount ? guessCategory(cleanText) : undefined;
+
+    const newEntry: Entry = {
+      id: crypto.randomUUID(),
+      text: cleanText,
+      amount,
+      category,
+      createdAt: new Date().toISOString(),
+    };
+
+    setEntries([newEntry, ...entries]);
+    setDraftText("");
+    setVoiceMessage("");
+    showSuccess(amount ? "Entry saved with detected amount" : "Entry saved");
+  };
+
+  const deleteEntry = (id: string) => {
+    setEntries(entries.filter((item) => item.id !== id));
+  };
+
+  const startVoiceCapture = () => {
     if (!isSpeechSupported()) {
       setVoiceMessage("Voice input is not supported in this browser.");
       return;
@@ -235,17 +242,12 @@ function App() {
       }
 
       const spokenText = finalText.trim();
+
       if (!spokenText) return;
 
-      if (mode === "note") {
-        setNoteText((previous) =>
-          previous.trim() ? `${previous.trim()} ${spokenText}` : spokenText
-        );
-      }
-
-      if (mode === "expense") {
-        parseVoiceExpense(spokenText);
-      }
+      setDraftText((previous) =>
+        previous.trim() ? `${previous.trim()} ${spokenText}` : spokenText
+      );
     };
 
     recognition.onerror = () => {
@@ -257,20 +259,13 @@ function App() {
         try {
           recognition.start();
           setIsListening(true);
-          setVoiceMode(mode);
-          setVoiceMessage(
-            mode === "expense"
-              ? "Listening for expense. Example: Foodpanda burgers 800 rupees."
-              : "Listening for note. Speak naturally."
-          );
+          setVoiceMessage("Listening... speak expense, note, feeling, food, or anything.");
         } catch {
           setIsListening(false);
-          setVoiceMode(null);
-          setVoiceMessage("Voice input stopped. Tap voice button again.");
+          setVoiceMessage("Voice input stopped. Tap Speak again.");
         }
       } else {
         setIsListening(false);
-        setVoiceMode(null);
       }
     };
 
@@ -280,12 +275,7 @@ function App() {
     try {
       recognition.start();
       setIsListening(true);
-      setVoiceMode(mode);
-      setVoiceMessage(
-        mode === "expense"
-          ? "Listening for expense. Example: Foodpanda burgers 800 rupees."
-          : "Listening for note. Speak naturally."
-      );
+      setVoiceMessage("Listening... speak expense, note, feeling, food, or anything.");
     } catch {
       setVoiceMessage("Voice input could not start. Please try again.");
     }
@@ -295,7 +285,6 @@ function App() {
     shouldKeepListeningRef.current = false;
     recognitionRef.current?.stop();
     setIsListening(false);
-    setVoiceMode(null);
     setVoiceMessage("");
   };
 
@@ -316,118 +305,35 @@ function App() {
     return true;
   };
 
-  const filteredExpenses = expenses.filter((item) => isInFilter(item.createdAt));
-  const filteredNotes = notes.filter((item) => isInFilter(item.createdAt));
+  const filteredEntries = entries.filter((item) => isInFilter(item.createdAt));
+
+  const expenseEntries = filteredEntries.filter((item) => item.amount);
 
   const total = useMemo(() => {
-    return filteredExpenses.reduce((sum, item) => sum + item.amount, 0);
-  }, [filteredExpenses]);
+    return expenseEntries.reduce((sum, item) => sum + (item.amount || 0), 0);
+  }, [expenseEntries]);
 
   const highestExpense = useMemo(() => {
-    if (filteredExpenses.length === 0) return null;
-    return filteredExpenses.reduce((highest, item) =>
-      item.amount > highest.amount ? item : highest
+    if (expenseEntries.length === 0) return null;
+
+    return expenseEntries.reduce((highest, item) =>
+      (item.amount || 0) > (highest.amount || 0) ? item : highest
     );
-  }, [filteredExpenses]);
+  }, [expenseEntries]);
 
   const categoryData = useMemo(() => {
     const grouped: Record<string, number> = {};
 
-    filteredExpenses.forEach((item) => {
-      grouped[item.category] = (grouped[item.category] || 0) + item.amount;
+    expenseEntries.forEach((item) => {
+      const key = item.category || "General";
+      grouped[key] = (grouped[key] || 0) + (item.amount || 0);
     });
 
     return Object.entries(grouped).map(([name, value]) => ({ name, value }));
-  }, [filteredExpenses]);
+  }, [expenseEntries]);
 
-  const timeline = useMemo(() => {
-    const items: TimelineItem[] = [
-      ...filteredExpenses.map((item) => ({
-        id: item.id,
-        kind: "expense" as const,
-        title: item.title,
-        subtitle: `${item.category} • ${new Date(item.createdAt).toLocaleTimeString(
-          "en-PK",
-          { hour: "2-digit", minute: "2-digit" }
-        )}`,
-        amount: item.amount,
-        createdAt: item.createdAt,
-      })),
-      ...filteredNotes.map((item) => ({
-        id: item.id,
-        kind: "note" as const,
-        title: "Note",
-        subtitle: new Date(item.createdAt).toLocaleTimeString("en-PK", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        createdAt: item.createdAt,
-      })),
-    ];
-
-    return items
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 8);
-  }, [filteredExpenses, filteredNotes]);
-
-  const addExpense = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const numericAmount = Number(amount);
-
-    if (!title.trim() || !amount || numericAmount <= 0) return;
-
-    setExpenses([
-      {
-        id: crypto.randomUUID(),
-        title: title.trim(),
-        amount: numericAmount,
-        category,
-        createdAt: new Date().toISOString(),
-      },
-      ...expenses,
-    ]);
-
-    setTitle("");
-    setAmount("");
-    setCategory("General");
-    setCapturedExpenseText("");
-    showSuccess("Expense saved");
-  };
-
-  const saveNote = () => {
-    if (!noteText.trim()) return;
-
-    setNotes([
-      {
-        id: crypto.randomUUID(),
-        text: noteText.trim(),
-        createdAt: new Date().toISOString(),
-      },
-      ...notes,
-    ]);
-
-    setNoteText("");
-    setVoiceMessage("");
-    showSuccess("Note saved");
-  };
-
-  const addNote = (e: React.FormEvent) => {
-    e.preventDefault();
-    saveNote();
-  };
-
-  const deleteExpense = (id: string) => {
-    setExpenses(expenses.filter((item) => item.id !== id));
-  };
-
-  const deleteNote = (id: string) => {
-    setNotes(notes.filter((item) => item.id !== id));
-  };
-
-  const scrollToSection = (sectionId: string) => {
-    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth" });
-  };
+  const detectedDraftAmount = detectAmount(draftText);
+  const detectedDraftCategory = detectedDraftAmount ? guessCategory(draftText) : undefined;
 
   const addPdfHeader = (doc: jsPDF, titleText: string) => {
     doc.setFillColor(15, 118, 110);
@@ -462,67 +368,30 @@ function App() {
     y += 11;
 
     doc.setFillColor(240, 253, 250);
-    doc.roundedRect(14, y, 182, 30, 4, 4, "F");
+    doc.roundedRect(14, y, 182, 34, 4, 4, "F");
     doc.setTextColor(20, 53, 47);
     doc.setFontSize(11);
-    doc.text(`Total Expenses: Rs. ${total.toLocaleString()}`, 20, y + 10);
-    doc.text(`Expense Entries: ${filteredExpenses.length}`, 20, y + 20);
-    doc.text(`Notes: ${filteredNotes.length}`, 105, y + 20);
-    y += 42;
+    doc.text(`Total Detected Expenses: Rs. ${total.toLocaleString()}`, 20, y + 10);
+    doc.text(`Total Entries: ${filteredEntries.length}`, 20, y + 20);
+    doc.text(`Detected Expense Entries: ${expenseEntries.length}`, 105, y + 20);
+    y += 46;
 
     doc.setFontSize(14);
     doc.setTextColor(15, 118, 110);
-    doc.text("Expenses", 14, y);
+    doc.text("Daily Log", 14, y);
     y += 8;
 
-    doc.setTextColor(20, 53, 47);
-    doc.setFontSize(10);
-
-    if (filteredExpenses.length === 0) {
-      doc.text("No expenses found for this view.", 14, y);
+    if (filteredEntries.length === 0) {
+      doc.setFontSize(10);
+      doc.setTextColor(20, 53, 47);
+      doc.text("No entries found for this view.", 14, y);
       y += 8;
     }
 
-    filteredExpenses.forEach((item, index) => {
+    filteredEntries.forEach((item, index) => {
       y = addPageIfNeeded(doc, y);
 
       doc.setFontSize(10);
-      doc.setTextColor(20, 53, 47);
-
-      const titleLine = `${index + 1}. ${item.title}`;
-      const metaLine = `Amount: Rs. ${item.amount.toLocaleString()} | Category: ${
-        item.category
-      } | Time: ${new Date(item.createdAt).toLocaleString("en-PK")}`;
-
-      const titleWrapped = doc.splitTextToSize(titleLine, 180);
-      doc.text(titleWrapped, 14, y);
-      y += titleWrapped.length * 5;
-
-      doc.setTextColor(100, 116, 139);
-      const metaWrapped = doc.splitTextToSize(metaLine, 180);
-      doc.text(metaWrapped, 18, y);
-      y += metaWrapped.length * 5 + 4;
-    });
-
-    y += 6;
-    y = addPageIfNeeded(doc, y);
-
-    doc.setFontSize(14);
-    doc.setTextColor(15, 118, 110);
-    doc.text("Notes", 14, y);
-    y += 8;
-
-    doc.setFontSize(10);
-
-    if (filteredNotes.length === 0) {
-      doc.setTextColor(20, 53, 47);
-      doc.text("No notes found for this view.", 14, y);
-      y += 8;
-    }
-
-    filteredNotes.forEach((item, index) => {
-      y = addPageIfNeeded(doc, y);
-
       doc.setTextColor(20, 53, 47);
       doc.text(`${index + 1}. ${new Date(item.createdAt).toLocaleString("en-PK")}`, 14, y);
       y += 6;
@@ -530,7 +399,19 @@ function App() {
       doc.setTextColor(71, 85, 105);
       const lines = doc.splitTextToSize(item.text, 180);
       doc.text(lines, 18, y);
-      y += lines.length * 5 + 6;
+      y += lines.length * 5;
+
+      if (item.amount) {
+        doc.setTextColor(15, 118, 110);
+        doc.text(
+          `Detected: Rs. ${item.amount.toLocaleString()} | Category: ${item.category || "General"}`,
+          18,
+          y + 3
+        );
+        y += 9;
+      } else {
+        y += 5;
+      }
     });
 
     y += 6;
@@ -538,28 +419,26 @@ function App() {
 
     doc.setFontSize(14);
     doc.setTextColor(15, 118, 110);
-    doc.text("Timeline", 14, y);
+    doc.text("Detected Expense Summary", 14, y);
     y += 8;
 
-    if (timeline.length === 0) {
+    if (expenseEntries.length === 0) {
       doc.setFontSize(10);
       doc.setTextColor(20, 53, 47);
-      doc.text("No timeline items found for this view.", 14, y);
+      doc.text("No detected expenses found for this view.", 14, y);
       y += 8;
     }
 
-    timeline.forEach((item) => {
+    expenseEntries.forEach((item, index) => {
       y = addPageIfNeeded(doc, y);
 
-      doc.setFontSize(10);
-      doc.setTextColor(20, 53, 47);
-
-      const line =
-        item.kind === "expense"
-          ? `Expense: ${item.title} | Rs. ${item.amount?.toLocaleString()} | ${item.subtitle}`
-          : `Note: ${item.subtitle}`;
+      const line = `${index + 1}. Rs. ${(item.amount || 0).toLocaleString()} | ${
+        item.category || "General"
+      } | ${item.text}`;
 
       const wrapped = doc.splitTextToSize(line, 180);
+      doc.setFontSize(10);
+      doc.setTextColor(20, 53, 47);
       doc.text(wrapped, 14, y);
       y += wrapped.length * 5 + 4;
     });
@@ -576,7 +455,7 @@ function App() {
           <p className="label">Private daily tracker</p>
           <h1>Daily Accountability Journal</h1>
           <p className="subtitle">
-            Speak expenses, speak notes, review quickly, save, and export your day as a clean PDF.
+            Speak or write anything from your day. Expenses are detected when an amount is present.
           </p>
         </div>
 
@@ -586,34 +465,26 @@ function App() {
         </div>
       </section>
 
-      <section className="quick-actions card">
+      <section className="capture-card card">
         <div className="section-heading">
-          <h2>Quick capture</h2>
-          <p>Fast mobile-first capture. Speak, review, and save.</p>
+          <h2>Say it out loud</h2>
+          <p>
+            Speak an expense, feeling, event, food log, work update, or any note.
+            Review the text and save it.
+          </p>
         </div>
 
-        <div className="quick-grid">
+        <div className="capture-actions">
           <button
-            className={isListening && voiceMode === "expense" ? "voice-button listening" : "voice-button"}
-            onClick={() =>
-              isListening && voiceMode === "expense"
-                ? stopVoiceCapture()
-                : startVoiceCapture("expense")
-            }
+            className={isListening ? "voice-button listening" : "voice-button"}
+            onClick={isListening ? stopVoiceCapture : startVoiceCapture}
           >
-            {isListening && voiceMode === "expense" ? "Stop Expense Voice" : "Speak Expense"}
+            {isListening ? "Stop Speaking" : "Start Speaking"}
           </button>
 
-          <button
-            className={isListening && voiceMode === "note" ? "voice-button listening" : "voice-button"}
-            onClick={() =>
-              isListening && voiceMode === "note" ? stopVoiceCapture() : startVoiceCapture("note")
-            }
-          >
-            {isListening && voiceMode === "note" ? "Stop Note Voice" : "Speak Note"}
+          <button type="button" onClick={saveEntry}>
+            Save Entry
           </button>
-
-          <button onClick={() => scrollToSection("expense-section")}>Manual Expense</button>
 
           <button className="export-button" onClick={downloadPDF}>
             Export PDF
@@ -622,19 +493,24 @@ function App() {
 
         {voiceMessage && <p className="voice-status">{voiceMessage}</p>}
 
-        {noteText.trim() && (
-          <div className="quick-note-preview">
-            <span>Note ready to save</span>
+        <textarea
+          className="main-capture-box"
+          value={draftText}
+          onChange={(e) => setDraftText(e.target.value)}
+          placeholder="Speak or type here. Example: Foodpanda two burgers 800 rupees. Or: I had a difficult call today but stayed calm."
+        />
 
-            <textarea
-              value={noteText}
-              onChange={(e) => setNoteText(e.target.value)}
-              placeholder="Your spoken note will appear here..."
-            />
-
-            <button type="button" onClick={saveNote}>
-              Save Note
-            </button>
+        {draftText.trim() && (
+          <div className="draft-preview">
+            <span>Ready to save</span>
+            {detectedDraftAmount ? (
+              <p>
+                Detected expense: <strong>Rs. {detectedDraftAmount.toLocaleString()}</strong>{" "}
+                {detectedDraftCategory && <>• {detectedDraftCategory}</>}
+              </p>
+            ) : (
+              <p>No amount detected. This will be saved as a normal daily log entry.</p>
+            )}
           </div>
         )}
 
@@ -654,124 +530,65 @@ function App() {
 
       <section className="summary-grid">
         <div className="summary-card primary">
-          <span>Total expenses</span>
+          <span>Total detected expenses</span>
           <strong>Rs. {total.toLocaleString()}</strong>
         </div>
 
         <div className="summary-card">
-          <span>Expense entries</span>
-          <strong>{filteredExpenses.length}</strong>
+          <span>Total entries</span>
+          <strong>{filteredEntries.length}</strong>
         </div>
 
         <div className="summary-card">
-          <span>Notes</span>
-          <strong>{filteredNotes.length}</strong>
+          <span>Detected expenses</span>
+          <strong>{expenseEntries.length}</strong>
         </div>
 
         <div className="summary-card">
-          <span>Highest expense</span>
-          <strong>{highestExpense ? `Rs. ${highestExpense.amount.toLocaleString()}` : "—"}</strong>
-          {highestExpense && <small>{highestExpense.title}</small>}
+          <span>Highest detected expense</span>
+          <strong>
+            {highestExpense ? `Rs. ${highestExpense.amount?.toLocaleString()}` : "—"}
+          </strong>
+          {highestExpense && <small>{highestExpense.text}</small>}
         </div>
       </section>
 
-      {timeline.length > 0 && (
+      {filteredEntries.length > 0 && (
         <section className="card timeline-card">
           <div className="section-heading">
-            <h2>Latest timeline</h2>
-            <p>Recent expenses and notes from the selected view.</p>
+            <h2>Daily log</h2>
+            <p>Everything you saved for the selected view.</p>
           </div>
 
           <div className="timeline-list">
-            {timeline.map((item) => (
-              <div className="timeline-item" key={`${item.kind}-${item.id}`}>
-                <span className={item.kind === "expense" ? "dot expense-dot" : "dot note-dot"} />
+            {filteredEntries.map((item) => (
+              <div className="timeline-item" key={item.id}>
+                <span className={item.amount ? "dot expense-dot" : "dot note-dot"} />
 
                 <div>
-                  <strong>{item.title}</strong>
-                  <p>{item.subtitle}</p>
+                  <strong>{new Date(item.createdAt).toLocaleString("en-PK")}</strong>
+                  <p>{item.text}</p>
+                  {item.amount && (
+                    <p className="detected-line">
+                      Detected: Rs. {item.amount.toLocaleString()} • {item.category}
+                    </p>
+                  )}
                 </div>
 
-                {item.amount && <b>Rs. {item.amount.toLocaleString()}</b>}
+                <button className="delete-button" onClick={() => deleteEntry(item.id)}>
+                  Delete
+                </button>
               </div>
             ))}
           </div>
         </section>
       )}
 
-      <section id="expense-section" className="card">
-        <div className="section-heading">
-          <h2>Expense</h2>
-          <p>Voice fills this form automatically. Review, edit if needed, then save.</p>
-        </div>
-
-        {capturedExpenseText && (
-          <div className="captured-box">
-            <span>Voice captured</span>
-            <p>{capturedExpenseText}</p>
-          </div>
-        )}
-
-        <form onSubmit={addExpense} className="expense-form">
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Expense title"
-          />
-
-          <input
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            type="number"
-            min="0"
-            placeholder="Amount"
-          />
-
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
-            {categories.map((item) => (
-              <option key={item}>{item}</option>
-            ))}
-          </select>
-
-          <button type="submit">Save Expense</button>
-        </form>
-
-        <div className="category-chips">
-          {categories.map((item) => (
-            <button
-              type="button"
-              key={item}
-              className={category === item ? "chip active" : "chip"}
-              onClick={() => setCategory(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section id="note-section" className="card">
-        <div className="section-heading">
-          <h2>Note</h2>
-          <p>Speak naturally or type. ChatGPT can analyze mood and patterns later from the PDF.</p>
-        </div>
-
-        <form onSubmit={addNote} className="simple-note-form">
-          <textarea
-            value={noteText}
-            onChange={(e) => setNoteText(e.target.value)}
-            placeholder="Speak or write anything about your day..."
-          />
-
-          <button type="submit">Save Note</button>
-        </form>
-      </section>
-
       {categoryData.length > 0 && (
         <section className="card chart-card">
           <div className="section-heading">
-            <h2>Expense breakdown</h2>
-            <p>Category-wise total for selected view.</p>
+            <h2>Detected expense breakdown</h2>
+            <p>Category-wise total from entries that include an amount.</p>
           </div>
 
           <ResponsiveContainer width="100%" height={280}>
@@ -793,63 +610,6 @@ function App() {
           </ResponsiveContainer>
         </section>
       )}
-
-      <section className="card">
-        <div className="section-heading">
-          <h2>Expenses</h2>
-          <p>Saved expenses for selected view.</p>
-        </div>
-
-        {filteredExpenses.length === 0 ? (
-          <p className="empty">No expenses found.</p>
-        ) : (
-          <div className="list">
-            {filteredExpenses.map((item) => (
-              <article className="list-item" key={item.id}>
-                <div>
-                  <strong>{item.title}</strong>
-                  <p>
-                    {item.category} • {new Date(item.createdAt).toLocaleString("en-PK")}
-                  </p>
-                </div>
-
-                <div className="item-side">
-                  <strong>Rs. {item.amount.toLocaleString()}</strong>
-                  <button className="delete-button" onClick={() => deleteExpense(item.id)}>
-                    Delete
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="card">
-        <div className="section-heading">
-          <h2>Notes</h2>
-          <p>Saved notes for selected view.</p>
-        </div>
-
-        {filteredNotes.length === 0 ? (
-          <p className="empty">No notes found.</p>
-        ) : (
-          <div className="list">
-            {filteredNotes.map((item) => (
-              <article className="list-item note-item" key={item.id}>
-                <div>
-                  <strong>{new Date(item.createdAt).toLocaleString("en-PK")}</strong>
-                  <p className="note-text">{item.text}</p>
-                </div>
-
-                <button className="delete-button" onClick={() => deleteNote(item.id)}>
-                  Delete
-                </button>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
     </main>
   );
 }
