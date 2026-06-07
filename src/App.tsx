@@ -19,6 +19,15 @@ type Note = {
   createdAt: string;
 };
 
+type TimelineItem = {
+  id: string;
+  kind: "expense" | "note";
+  title: string;
+  subtitle: string;
+  amount?: number;
+  createdAt: string;
+};
+
 type SpeechRecognitionType = {
   lang: string;
   interimResults: boolean;
@@ -30,10 +39,25 @@ type SpeechRecognitionType = {
   onend: (() => void) | null;
 };
 
+type VoiceMode = "note" | "expense" | null;
+
 const EXPENSE_KEY = "daj-expenses";
 const NOTE_KEY = "daj-notes";
 
-const categories = ["General", "Food", "Travel", "Health", "Family", "Work", "Self-care", "Other"];
+const categories = [
+  "General",
+  "Food",
+  "Travel",
+  "Health",
+  "Family",
+  "Work",
+  "Self-care",
+  "Rent",
+  "Bills",
+  "Other",
+];
+
+const quickCategories = ["Food", "Travel", "Health", "Rent", "Bills", "Work", "Other"];
 
 const noteTypes = [
   "General Note",
@@ -47,21 +71,37 @@ const noteTypes = [
 
 const moods = ["Calm", "Productive", "Stressed", "Angry", "Sad", "Tired", "Grateful"];
 
-const chartColors = ["#0f766e", "#16a34a", "#2563eb", "#f59e0b", "#ef4444", "#8b5cf6", "#64748b", "#14b8a6"];
+const chartColors = [
+  "#0f766e",
+  "#16a34a",
+  "#2563eb",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#64748b",
+  "#14b8a6",
+  "#0ea5e9",
+  "#84cc16",
+];
 
 function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("General");
+
   const [noteText, setNoteText] = useState("");
   const [noteType, setNoteType] = useState("General Note");
   const [mood, setMood] = useState("Calm");
+
   const [filter, setFilter] = useState("today");
   const [successMessage, setSuccessMessage] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [voiceMessage, setVoiceMessage] = useState("");
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>(null);
+  const [capturedExpenseText, setCapturedExpenseText] = useState("");
 
   const recognitionRef = useRef<SpeechRecognitionType | null>(null);
   const shouldKeepListeningRef = useRef(false);
@@ -86,14 +126,117 @@ function App() {
     day: "numeric",
   });
 
+  const showSuccess = (message: string) => {
+    setSuccessMessage(message);
+
+    setTimeout(() => {
+      setSuccessMessage("");
+    }, 2200);
+  };
+
   const isSpeechSupported = () => {
     return "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
   };
 
-  const startVoiceNote = () => {
+  const guessCategory = (text: string) => {
+    const lower = text.toLowerCase();
+
+    if (
+      lower.includes("food") ||
+      lower.includes("burger") ||
+      lower.includes("fries") ||
+      lower.includes("pizza") ||
+      lower.includes("tea") ||
+      lower.includes("lunch") ||
+      lower.includes("dinner") ||
+      lower.includes("breakfast") ||
+      lower.includes("foodpanda")
+    ) {
+      return "Food";
+    }
+
+    if (
+      lower.includes("uber") ||
+      lower.includes("careem") ||
+      lower.includes("rickshaw") ||
+      lower.includes("bus") ||
+      lower.includes("travel") ||
+      lower.includes("petrol") ||
+      lower.includes("fuel")
+    ) {
+      return "Travel";
+    }
+
+    if (
+      lower.includes("rent") ||
+      lower.includes("room") ||
+      lower.includes("hotel") ||
+      lower.includes("guest house")
+    ) {
+      return "Rent";
+    }
+
+    if (
+      lower.includes("bill") ||
+      lower.includes("electricity") ||
+      lower.includes("gas") ||
+      lower.includes("water") ||
+      lower.includes("internet")
+    ) {
+      return "Bills";
+    }
+
+    if (
+      lower.includes("medicine") ||
+      lower.includes("doctor") ||
+      lower.includes("hospital") ||
+      lower.includes("health")
+    ) {
+      return "Health";
+    }
+
+    if (lower.includes("office") || lower.includes("work") || lower.includes("client")) {
+      return "Work";
+    }
+
+    return "General";
+  };
+
+  const parseVoiceExpense = (spokenText: string) => {
+    const cleanText = spokenText.trim();
+    const matches = cleanText.match(/\d+(?:,\d+)*(?:\.\d+)?/g);
+
+    if (!matches || matches.length === 0) {
+      setCapturedExpenseText(cleanText);
+      setTitle(cleanText);
+      setAmount("");
+      setCategory(guessCategory(cleanText));
+      setVoiceMessage("Could not detect amount. Please enter amount manually.");
+      return;
+    }
+
+    const detectedAmount = matches[matches.length - 1].replace(/,/g, "");
+    const titleWithoutAmount = cleanText
+      .replace(matches[matches.length - 1], "")
+      .replace(/\b(rupees|rs|pkr|r s)\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    setCapturedExpenseText(cleanText);
+    setTitle(titleWithoutAmount || cleanText);
+    setAmount(detectedAmount);
+    setCategory(guessCategory(cleanText));
+    setVoiceMessage("Voice expense filled. Review and tap Add Expense.");
+  };
+
+  const startVoiceCapture = (mode: "note" | "expense") => {
     if (!isSpeechSupported()) {
       setVoiceMessage("Voice input is not supported in this browser.");
       return;
+    }
+
+    if (isListening) {
+      stopVoiceCapture();
     }
 
     const SpeechRecognition =
@@ -116,10 +259,16 @@ function App() {
 
       const spokenText = finalText.trim();
 
-      if (spokenText) {
+      if (!spokenText) return;
+
+      if (mode === "note") {
         setNoteText((previous) =>
           previous.trim() ? `${previous.trim()} ${spokenText}` : spokenText
         );
+      }
+
+      if (mode === "expense") {
+        parseVoiceExpense(spokenText);
       }
     };
 
@@ -132,14 +281,20 @@ function App() {
         try {
           recognition.start();
           setIsListening(true);
-          setVoiceMessage("Listening... speak your note.");
+          setVoiceMode(mode);
+          setVoiceMessage(
+            mode === "expense"
+              ? "Listening for expense... example: Foodpanda burgers 800 rupees."
+              : "Listening for note... speak naturally."
+          );
         } catch {
           setIsListening(false);
-          setVoiceMessage("Voice input stopped. Tap Start Voice again.");
+          setVoiceMode(null);
+          setVoiceMessage("Voice input stopped. Tap voice button again.");
         }
       } else {
         setIsListening(false);
-        setVoiceMessage("");
+        setVoiceMode(null);
       }
     };
 
@@ -149,16 +304,22 @@ function App() {
     try {
       recognition.start();
       setIsListening(true);
-      setVoiceMessage("Listening... speak your note.");
+      setVoiceMode(mode);
+      setVoiceMessage(
+        mode === "expense"
+          ? "Listening for expense... example: Foodpanda burgers 800 rupees."
+          : "Listening for note... speak naturally."
+      );
     } catch {
       setVoiceMessage("Voice input could not start. Please try again.");
     }
   };
 
-  const stopVoiceNote = () => {
+  const stopVoiceCapture = () => {
     shouldKeepListeningRef.current = false;
     recognitionRef.current?.stop();
     setIsListening(false);
+    setVoiceMode(null);
     setVoiceMessage("");
   };
 
@@ -167,7 +328,10 @@ function App() {
     const now = new Date();
 
     if (filter === "all") return true;
-    if (filter === "today") return date.toDateString() === now.toDateString();
+
+    if (filter === "today") {
+      return date.toDateString() === now.toDateString();
+    }
 
     if (filter === "month") {
       return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
@@ -192,23 +356,49 @@ function App() {
 
   const categoryData = useMemo(() => {
     const grouped: Record<string, number> = {};
+
     filteredExpenses.forEach((item) => {
       grouped[item.category] = (grouped[item.category] || 0) + item.amount;
     });
+
     return Object.entries(grouped).map(([name, value]) => ({ name, value }));
   }, [filteredExpenses]);
 
-  const showSuccess = (message: string) => {
-  setSuccessMessage(message);
+  const todayTimeline = useMemo(() => {
+    const timelineItems: TimelineItem[] = [
+      ...filteredExpenses.map((item) => ({
+        id: item.id,
+        kind: "expense" as const,
+        title: item.title,
+        subtitle: `${item.category} • ${new Date(item.createdAt).toLocaleTimeString("en-PK", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`,
+        amount: item.amount,
+        createdAt: item.createdAt,
+      })),
+      ...filteredNotes.map((item) => ({
+        id: item.id,
+        kind: "note" as const,
+        title: item.type,
+        subtitle: `Mood: ${item.mood} • ${new Date(item.createdAt).toLocaleTimeString("en-PK", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`,
+        createdAt: item.createdAt,
+      })),
+    ];
 
-  setTimeout(() => {
-    setSuccessMessage("");
-  }, 2200);
-};
+    return timelineItems
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 8);
+  }, [filteredExpenses, filteredNotes]);
 
   const addExpense = (e: React.FormEvent) => {
     e.preventDefault();
+
     const numericAmount = Number(amount);
+
     if (!title.trim() || !amount || numericAmount <= 0) return;
 
     setExpenses([
@@ -225,11 +415,13 @@ function App() {
     setTitle("");
     setAmount("");
     setCategory("General");
+    setCapturedExpenseText("");
     showSuccess("Expense added successfully");
   };
 
   const addNote = (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!noteText.trim()) return;
 
     setNotes([
@@ -256,6 +448,10 @@ function App() {
 
   const deleteNote = (id: string) => {
     setNotes(notes.filter((item) => item.id !== id));
+  };
+
+  const scrollToSection = (sectionId: string) => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth" });
   };
 
   const downloadPDF = () => {
@@ -329,7 +525,9 @@ function App() {
 
       doc.setFontSize(10);
       doc.text(
-        `${item.type} | Mood: ${item.mood} | ${new Date(item.createdAt).toLocaleString("en-PK")}`,
+        `${item.type} | Mood: ${item.mood} | ${new Date(item.createdAt).toLocaleString(
+          "en-PK"
+        )}`,
         14,
         y
       );
@@ -346,6 +544,7 @@ function App() {
   return (
     <main className="app">
       {successMessage && <div className="toast">{successMessage}</div>}
+
       <section className="hero">
         <div>
           <p className="label">Private daily tracker</p>
@@ -361,6 +560,45 @@ function App() {
         </div>
       </section>
 
+      <section className="quick-actions card">
+        <div className="section-heading">
+          <h2>Quick capture</h2>
+          <p>Use fast buttons for mobile. Voice expense fills the form for review before saving.</p>
+        </div>
+
+        <div className="quick-grid">
+          <button onClick={() => scrollToSection("expense-section")}>+ Expense</button>
+
+          <button
+            className={isListening && voiceMode === "expense" ? "voice-button listening" : "voice-button"}
+            onClick={() =>
+              isListening && voiceMode === "expense"
+                ? stopVoiceCapture()
+                : startVoiceCapture("expense")
+            }
+          >
+            {isListening && voiceMode === "expense" ? "Stop Expense Voice" : "Voice Expense"}
+          </button>
+
+          <button
+            className={isListening && voiceMode === "note" ? "voice-button listening" : "voice-button"}
+            onClick={() =>
+              isListening && voiceMode === "note" ? stopVoiceCapture() : startVoiceCapture("note")
+            }
+          >
+            {isListening && voiceMode === "note" ? "Stop Note Voice" : "Voice Note"}
+          </button>
+
+          <button className="export-button" onClick={downloadPDF}>
+            Export PDF
+          </button>
+        </div>
+
+        {voiceMessage && <p className="voice-status">{voiceMessage}</p>}
+
+        <p className="privacy-note">No login. No backend. Your data stays in your browser.</p>
+      </section>
+
       <section className="toolbar">
         <div className="filter-box">
           <label>View</label>
@@ -370,10 +608,6 @@ function App() {
             <option value="all">All Data</option>
           </select>
         </div>
-
-        <button className="export-button" onClick={downloadPDF}>
-          Export PDF
-        </button>
       </section>
 
       <section className="summary-grid">
@@ -394,16 +628,47 @@ function App() {
 
         <div className="summary-card">
           <span>Highest expense</span>
-          <strong>{highestExpense ? `Rs. ${highestExpense.amount.toLocaleString()}` : "—"}</strong>
+          <strong>
+            {highestExpense ? `Rs. ${highestExpense.amount.toLocaleString()}` : "—"}
+          </strong>
           {highestExpense && <small>{highestExpense.title}</small>}
         </div>
       </section>
 
-      <section className="card">
+      {todayTimeline.length > 0 && (
+        <section className="card timeline-card">
+          <div className="section-heading">
+            <h2>Latest timeline</h2>
+            <p>Recent expenses and notes from the selected view.</p>
+          </div>
+
+          <div className="timeline-list">
+            {todayTimeline.map((item) => (
+              <div className="timeline-item" key={`${item.kind}-${item.id}`}>
+                <span className={item.kind === "expense" ? "dot expense-dot" : "dot note-dot"} />
+                <div>
+                  <strong>{item.title}</strong>
+                  <p>{item.subtitle}</p>
+                </div>
+                {item.amount && <b>Rs. {item.amount.toLocaleString()}</b>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section id="expense-section" className="card">
         <div className="section-heading">
           <h2>Add expense</h2>
-          <p>Enter exactly what you spent. The app only calculates totals.</p>
+          <p>Type manually or use voice expense. Review before saving.</p>
         </div>
+
+        {capturedExpenseText && (
+          <div className="captured-box">
+            <span>Voice captured</span>
+            <p>{capturedExpenseText}</p>
+          </div>
+        )}
 
         <form onSubmit={addExpense} className="expense-form">
           <input
@@ -428,12 +693,25 @@ function App() {
 
           <button type="submit">Add Expense</button>
         </form>
+
+        <div className="category-chips">
+          {quickCategories.map((item) => (
+            <button
+              type="button"
+              key={item}
+              className={category === item ? "chip active" : "chip"}
+              onClick={() => setCategory(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
       </section>
 
-      <section className="card">
+      <section id="note-section" className="card">
         <div className="section-heading">
           <h2>Add note</h2>
-          <p>Type your note or use voice input. Voice is converted to text only.</p>
+          <p>Type your note or use voice note. Voice is converted to text only.</p>
         </div>
 
         <form onSubmit={addNote} className="note-form">
@@ -448,18 +726,6 @@ function App() {
               <option key={item}>{item}</option>
             ))}
           </select>
-
-          <div className="voice-row">
-            <button
-              type="button"
-              className={isListening ? "voice-button listening" : "voice-button"}
-              onClick={isListening ? stopVoiceNote : startVoiceNote}
-            >
-              {isListening ? "Stop Voice" : "Start Voice"}
-            </button>
-
-            <span>{voiceMessage || "Voice input works best in Chrome."}</span>
-          </div>
 
           <textarea
             value={noteText}
@@ -480,7 +746,14 @@ function App() {
 
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
-              <Pie data={categoryData} dataKey="value" nameKey="name" outerRadius={92} innerRadius={46} label>
+              <Pie
+                data={categoryData}
+                dataKey="value"
+                nameKey="name"
+                outerRadius={92}
+                innerRadius={46}
+                label
+              >
                 {categoryData.map((_, index) => (
                   <Cell key={index} fill={chartColors[index % chartColors.length]} />
                 ))}
