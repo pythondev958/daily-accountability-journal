@@ -26,18 +26,6 @@ const ENTRY_KEY = "daj-unified-entries-v1";
 const OLD_EXPENSE_KEY = "daj-expenses";
 const OLD_NOTE_KEY = "daj-notes";
 
-const categories = [
-  "General",
-  "Food",
-  "Travel",
-  "Health",
-  "Rent",
-  "Bills",
-  "Work",
-  "Self-care",
-  "Other",
-];
-
 const chartColors = [
   "#0f766e",
   "#16a34a",
@@ -108,7 +96,10 @@ function App() {
 
   const showSuccess = (message: string) => {
     setSuccessMessage(message);
-    setTimeout(() => setSuccessMessage(""), 2200);
+
+    setTimeout(() => {
+      setSuccessMessage("");
+    }, 2200);
   };
 
   const isSpeechSupported = () => {
@@ -172,7 +163,11 @@ function App() {
       return "Health";
     }
 
-    if (lower.includes("office") || lower.includes("work") || lower.includes("client")) {
+    if (
+      lower.includes("office") ||
+      lower.includes("work") ||
+      lower.includes("client")
+    ) {
       return "Work";
     }
 
@@ -259,7 +254,9 @@ function App() {
         try {
           recognition.start();
           setIsListening(true);
-          setVoiceMessage("Listening... speak expense, note, feeling, food, or anything.");
+          setVoiceMessage(
+            "Listening... speak expense, note, feeling, food, or anything."
+          );
         } catch {
           setIsListening(false);
           setVoiceMessage("Voice input stopped. Tap Speak again.");
@@ -275,7 +272,9 @@ function App() {
     try {
       recognition.start();
       setIsListening(true);
-      setVoiceMessage("Listening... speak expense, note, feeling, food, or anything.");
+      setVoiceMessage(
+        "Listening... speak expense, note, feeling, food, or anything."
+      );
     } catch {
       setVoiceMessage("Voice input could not start. Please try again.");
     }
@@ -299,14 +298,16 @@ function App() {
     }
 
     if (filter === "month") {
-      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+      return (
+        date.getMonth() === now.getMonth() &&
+        date.getFullYear() === now.getFullYear()
+      );
     }
 
     return true;
   };
 
   const filteredEntries = entries.filter((item) => isInFilter(item.createdAt));
-
   const expenseEntries = filteredEntries.filter((item) => item.amount);
 
   const total = useMemo(() => {
@@ -333,7 +334,9 @@ function App() {
   }, [expenseEntries]);
 
   const detectedDraftAmount = detectAmount(draftText);
-  const detectedDraftCategory = detectedDraftAmount ? guessCategory(draftText) : undefined;
+  const detectedDraftCategory = detectedDraftAmount
+    ? guessCategory(draftText)
+    : undefined;
 
   const addPdfHeader = (doc: jsPDF, titleText: string) => {
     doc.setFillColor(15, 118, 110);
@@ -404,7 +407,9 @@ function App() {
       if (item.amount) {
         doc.setTextColor(15, 118, 110);
         doc.text(
-          `Detected: Rs. ${item.amount.toLocaleString()} | Category: ${item.category || "General"}`,
+          `Detected: Rs. ${item.amount.toLocaleString()} | Category: ${
+            item.category || "General"
+          }`,
           18,
           y + 3
         );
@@ -505,7 +510,8 @@ function App() {
             <span>Ready to save</span>
             {detectedDraftAmount ? (
               <p>
-                Detected expense: <strong>Rs. {detectedDraftAmount.toLocaleString()}</strong>{" "}
+                Detected expense:{" "}
+                <strong>Rs. {detectedDraftAmount.toLocaleString()}</strong>{" "}
                 {detectedDraftCategory && <>• {detectedDraftCategory}</>}
               </p>
             ) : (
