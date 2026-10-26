@@ -40,6 +40,7 @@ const chartColors = [
 
 function App() {
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [storageReady, setStorageReady] = useState(false);
   const [draftText, setDraftText] = useState("");
   const [filter, setFilter] = useState("today");
   const [successMessage, setSuccessMessage] = useState("");
@@ -53,12 +54,28 @@ function App() {
     const savedEntries = localStorage.getItem(ENTRY_KEY);
 
     if (savedEntries) {
-      setEntries(JSON.parse(savedEntries));
-      return;
+      try {
+        const parsed = JSON.parse(savedEntries);
+        if (Array.isArray(parsed)) {
+          setEntries(parsed);
+          setStorageReady(true);
+          return;
+        }
+      } catch {
+        // Leave invalid stored data untouched until legacy migration is checked.
+      }
     }
 
-    const oldExpenses = JSON.parse(localStorage.getItem(OLD_EXPENSE_KEY) || "[]");
-    const oldNotes = JSON.parse(localStorage.getItem(OLD_NOTE_KEY) || "[]");
+    let oldExpenses: Array<Record<string, unknown>> = [];
+    let oldNotes: Array<Record<string, unknown>> = [];
+    try {
+      const expenses = JSON.parse(localStorage.getItem(OLD_EXPENSE_KEY) || "[]");
+      const notes = JSON.parse(localStorage.getItem(OLD_NOTE_KEY) || "[]");
+      oldExpenses = Array.isArray(expenses) ? expenses : [];
+      oldNotes = Array.isArray(notes) ? notes : [];
+    } catch {
+      // Keep the app usable when legacy storage is not valid JSON.
+    }
 
     if (oldExpenses.length || oldNotes.length) {
       const migratedEntries: Entry[] = [
@@ -81,11 +98,13 @@ function App() {
 
       setEntries(migratedEntries);
     }
+    setStorageReady(true);
   }, []);
 
   useEffect(() => {
+    if (!storageReady) return;
     localStorage.setItem(ENTRY_KEY, JSON.stringify(entries));
-  }, [entries]);
+  }, [entries, storageReady]);
 
   const todayLabel = new Date().toLocaleDateString("en-PK", {
     weekday: "long",
@@ -106,80 +125,58 @@ function App() {
     return "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
   };
 
-  const guessCategory = (text: string) => {
-    const lower = text.toLowerCase();
+  // Lightweight, rule-based categorization. No external AI service is used.
+  const guessCategory = (text: string): string => {
+    const value = text.toLowerCase();
+    const matches = (terms: string[]) =>
+      terms.some((term) => new RegExp(`\\b${term}\\b`, "i").test(value));
 
-    if (
-      lower.includes("food") ||
-      lower.includes("burger") ||
-      lower.includes("fries") ||
-      lower.includes("pizza") ||
-      lower.includes("tea") ||
-      lower.includes("lunch") ||
-      lower.includes("dinner") ||
-      lower.includes("breakfast") ||
-      lower.includes("foodpanda")
-    ) {
-      return "Food";
+    if (matches(["software", "subscription", "license", "licence", "hosting", "domain", "cloud", "saas"])) {
+      return "Software & Services";
     }
-
-    if (
-      lower.includes("uber") ||
-      lower.includes("careem") ||
-      lower.includes("rickshaw") ||
-      lower.includes("bus") ||
-      lower.includes("travel") ||
-      lower.includes("petrol") ||
-      lower.includes("fuel")
-    ) {
-      return "Travel";
+    if (matches(["transportation", "transport", "commute", "travel", "parking", "fuel", "petrol", "toll"])) {
+      return "Transportation";
     }
-
-    if (
-      lower.includes("rent") ||
-      lower.includes("room") ||
-      lower.includes("hotel") ||
-      lower.includes("guest house")
-    ) {
-      return "Rent";
+    if (matches(["stationery", "equipment", "supplies", "hardware", "accessories", "printing", "office"])) {
+      return "Office & Supplies";
     }
-
-    if (
-      lower.includes("bill") ||
-      lower.includes("electricity") ||
-      lower.includes("gas") ||
-      lower.includes("water") ||
-      lower.includes("internet")
-    ) {
-      return "Bills";
+    if (matches(["electricity", "utility", "utilities", "internet", "broadband", "water", "gas", "bill", "bills"])) {
+      return "Utilities";
     }
-
-    if (
-      lower.includes("medicine") ||
-      lower.includes("doctor") ||
-      lower.includes("hospital") ||
-      lower.includes("health")
-    ) {
-      return "Health";
+    if (matches(["training", "course", "certification", "conference", "workshop", "education"])) {
+      return "Professional Development";
     }
-
-    if (
-      lower.includes("office") ||
-      lower.includes("work") ||
-      lower.includes("client")
-    ) {
-      return "Work";
+    if (matches(["healthcare", "medical", "pharmacy", "medicine", "hospital", "clinic", "health"])) {
+      return "Health & Wellness";
     }
-
+    if (matches(["accommodation", "hotel", "lodging", "rent", "housing"])) {
+      return "Accommodation";
+    }
+    if (matches(["meal", "meals", "dining", "restaurant", "catering", "refreshments", "hospitality"])) {
+      return "Meals & Hospitality";
+    }
     return "General";
   };
 
-  const detectAmount = (text: string) => {
-    const matches = text.match(/\d+(?:,\d+)*(?:\.\d+)?/g);
+  // Only treat a number as an expense when currency is explicitly included.
+  // Examples: "PKR 1,200", "Rs. 850", "1,200 rupees".
+  // "Completed 3 tasks" is a normal note, not an expense.
+  const detectAmount = (text: string): number | undefined => {
+    const currencyBeforeAmount = text.match(
+      /(?:^|[^a-zA-Z])(?:PKR|Rs\.?|rupees?)\s*[:\-]?\s*(\d[\d,]*(?:\.\d{1,2})?)(?!\d)/i
+    );
+    const amountBeforeCurrency = text.match(
+      /(?:^|[^\d])(\d[\d,]*(?:\.\d{1,2})?)\s*(?:PKR|Rs\.?|rupees?)\b/i
+    );
 
-    if (!matches || matches.length === 0) return undefined;
+    const raw = currencyBeforeAmount?.[1] ?? amountBeforeCurrency?.[1];
+    if (!raw) return undefined;
 
-    return Number(matches[matches.length - 1].replace(/,/g, ""));
+    // Reject malformed amounts such as "1,20" rather than guessing.
+    if (!/^\d+(?:,\d{3})*(?:\.\d{1,2})?$/.test(raw)) return undefined;
+
+    const amount = Number(raw.replace(/,/g, ""));
+    return Number.isFinite(amount) && amount > 0 ? amount : undefined;
   };
 
   const saveEntry = () => {
@@ -201,7 +198,7 @@ function App() {
     setEntries([newEntry, ...entries]);
     setDraftText("");
     setVoiceMessage("");
-    showSuccess(amount ? "Entry saved with detected amount" : "Entry saved");
+    showSuccess(amount ? "Entry saved with an expense amount" : "Entry saved");
   };
 
   const deleteEntry = (id: string) => {
@@ -245,8 +242,15 @@ function App() {
       );
     };
 
-    recognition.onerror = () => {
-      setVoiceMessage("Voice input paused. Restarting if allowed...");
+    recognition.onerror = (event: any) => {
+      const error = typeof event?.error === "string" ? event.error : "";
+      if (["not-allowed", "service-not-allowed", "audio-capture", "aborted"].includes(error)) {
+        shouldKeepListeningRef.current = false;
+        setIsListening(false);
+        setVoiceMessage("Voice input stopped. Check microphone permissions and try again.");
+      } else {
+        setVoiceMessage("Voice input was interrupted. Restarting if supported...");
+      }
     };
 
     recognition.onend = () => {
@@ -255,7 +259,7 @@ function App() {
           recognition.start();
           setIsListening(true);
           setVoiceMessage(
-            "Listening... speak expense, note, feeling, food, or anything."
+            "Listening... dictate a work update, personal note, or expense."
           );
         } catch {
           setIsListening(false);
@@ -273,10 +277,12 @@ function App() {
       recognition.start();
       setIsListening(true);
       setVoiceMessage(
-        "Listening... speak expense, note, feeling, food, or anything."
+        "Listening... dictate a work update, personal note, or expense."
       );
     } catch {
-      setVoiceMessage("Voice input could not start. Please try again.");
+      shouldKeepListeningRef.current = false;
+      setIsListening(false);
+      setVoiceMessage("Voice input could not start. Check browser and microphone permissions.");
     }
   };
 
@@ -367,27 +373,27 @@ function App() {
     doc.setTextColor(71, 85, 105);
     doc.text(`Generated: ${new Date().toLocaleString("en-PK")}`, 14, y);
     y += 7;
-    doc.text(`Selected view: ${filter}`, 14, y);
+    doc.text(`Reporting period: ${filter}`, 14, y);
     y += 11;
 
     doc.setFillColor(240, 253, 250);
     doc.roundedRect(14, y, 182, 34, 4, 4, "F");
     doc.setTextColor(20, 53, 47);
     doc.setFontSize(11);
-    doc.text(`Total Detected Expenses: Rs. ${total.toLocaleString()}`, 20, y + 10);
+    doc.text(`Total Recorded Expenses: Rs. ${total.toLocaleString()}`, 20, y + 10);
     doc.text(`Total Entries: ${filteredEntries.length}`, 20, y + 20);
-    doc.text(`Detected Expense Entries: ${expenseEntries.length}`, 105, y + 20);
+    doc.text(`Expense Entries: ${expenseEntries.length}`, 105, y + 20);
     y += 46;
 
     doc.setFontSize(14);
     doc.setTextColor(15, 118, 110);
-    doc.text("Daily Log", 14, y);
+    doc.text("Activity Timeline", 14, y);
     y += 8;
 
     if (filteredEntries.length === 0) {
       doc.setFontSize(10);
       doc.setTextColor(20, 53, 47);
-      doc.text("No entries found for this view.", 14, y);
+      doc.text("No entries found for this reporting period.", 14, y);
       y += 8;
     }
 
@@ -407,7 +413,7 @@ function App() {
       if (item.amount) {
         doc.setTextColor(15, 118, 110);
         doc.text(
-          `Detected: Rs. ${item.amount.toLocaleString()} | Category: ${
+          `Expense: Rs. ${item.amount.toLocaleString()} | Category: ${
             item.category || "General"
           }`,
           18,
@@ -424,13 +430,13 @@ function App() {
 
     doc.setFontSize(14);
     doc.setTextColor(15, 118, 110);
-    doc.text("Detected Expense Summary", 14, y);
+    doc.text("Expense Summary", 14, y);
     y += 8;
 
     if (expenseEntries.length === 0) {
       doc.setFontSize(10);
       doc.setTextColor(20, 53, 47);
-      doc.text("No detected expenses found for this view.", 14, y);
+      doc.text("No expense records found for this reporting period.", 14, y);
       y += 8;
     }
 
@@ -457,10 +463,10 @@ function App() {
 
       <section className="hero">
         <div>
-          <p className="label">Private daily tracker</p>
+          <p className="label">PERSONAL PRODUCTIVITY WORKSPACE</p>
           <h1>Daily Accountability Journal</h1>
           <p className="subtitle">
-            Speak or write anything from your day. Expenses are detected when an amount is present.
+            Organize daily activities, capture important notes, and track expenses in one streamlined workspace.
           </p>
         </div>
 
@@ -472,10 +478,10 @@ function App() {
 
       <section className="capture-card card">
         <div className="section-heading">
-          <h2>Say it out loud</h2>
+          <h2>Create a New Entry</h2>
           <p>
-            Speak an expense, feeling, event, food log, work update, or any note.
-            Review the text and save it.
+            Record a work update, personal reflection, or expense using text or voice.
+            Review your entry before saving.
           </p>
         </div>
 
@@ -484,7 +490,7 @@ function App() {
             className={isListening ? "voice-button listening" : "voice-button"}
             onClick={isListening ? stopVoiceCapture : startVoiceCapture}
           >
-            {isListening ? "Stop Speaking" : "Start Speaking"}
+            {isListening ? "Stop Voice Input" : "Start Voice Input"}
           </button>
 
           <button type="button" onClick={saveEntry}>
@@ -492,7 +498,7 @@ function App() {
           </button>
 
           <button className="export-button" onClick={downloadPDF}>
-            Export PDF
+            Export Report
           </button>
         </div>
 
@@ -502,30 +508,30 @@ function App() {
           className="main-capture-box"
           value={draftText}
           onChange={(e) => setDraftText(e.target.value)}
-          placeholder="Speak or type here. Example: Foodpanda two burgers 800 rupees. Or: I had a difficult call today but stayed calm."
+          placeholder="Example: Completed the project review and documented next steps. Or: Office supplies expense PKR 850."
         />
 
         {draftText.trim() && (
           <div className="draft-preview">
-            <span>Ready to save</span>
+            <span>Entry preview</span>
             {detectedDraftAmount ? (
               <p>
-                Detected expense:{" "}
+                Expense identified:{" "}
                 <strong>Rs. {detectedDraftAmount.toLocaleString()}</strong>{" "}
                 {detectedDraftCategory && <>• {detectedDraftCategory}</>}
               </p>
             ) : (
-              <p>No amount detected. This will be saved as a normal daily log entry.</p>
+              <p>No currency amount detected. This will be saved as a regular journal entry.</p>
             )}
           </div>
         )}
 
-        <p className="privacy-note">No login. No backend. Your data stays in your browser.</p>
+        <p className="privacy-note">No account required. Entries are stored in this browser; voice recognition depends on browser support.</p>
       </section>
 
       <section className="toolbar">
         <div className="filter-box">
-          <label>View</label>
+          <label>Reporting period</label>
           <select value={filter} onChange={(e) => setFilter(e.target.value)}>
             <option value="today">Today</option>
             <option value="month">This Month</option>
@@ -536,7 +542,7 @@ function App() {
 
       <section className="summary-grid">
         <div className="summary-card primary">
-          <span>Total detected expenses</span>
+          <span>Total recorded expenses</span>
           <strong>Rs. {total.toLocaleString()}</strong>
         </div>
 
@@ -546,12 +552,12 @@ function App() {
         </div>
 
         <div className="summary-card">
-          <span>Detected expenses</span>
+          <span>Expense entries</span>
           <strong>{expenseEntries.length}</strong>
         </div>
 
         <div className="summary-card">
-          <span>Highest detected expense</span>
+          <span>Largest expense</span>
           <strong>
             {highestExpense ? `Rs. ${highestExpense.amount?.toLocaleString()}` : "—"}
           </strong>
@@ -562,8 +568,8 @@ function App() {
       {filteredEntries.length > 0 && (
         <section className="card timeline-card">
           <div className="section-heading">
-            <h2>Daily log</h2>
-            <p>Everything you saved for the selected view.</p>
+            <h2>Activity timeline</h2>
+            <p>Entries recorded for the selected reporting period.</p>
           </div>
 
           <div className="timeline-list">
@@ -576,7 +582,7 @@ function App() {
                   <p>{item.text}</p>
                   {item.amount && (
                     <p className="detected-line">
-                      Detected: Rs. {item.amount.toLocaleString()} • {item.category}
+                      Expense: Rs. {item.amount.toLocaleString()} • {item.category}
                     </p>
                   )}
                 </div>
@@ -593,8 +599,8 @@ function App() {
       {categoryData.length > 0 && (
         <section className="card chart-card">
           <div className="section-heading">
-            <h2>Detected expense breakdown</h2>
-            <p>Category-wise total from entries that include an amount.</p>
+            <h2>Expense distribution</h2>
+            <p>Expenses grouped by category for the selected period.</p>
           </div>
 
           <ResponsiveContainer width="100%" height={280}>
